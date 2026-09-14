@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=cmd.exe /c \"cd /d C:\\__Personal\\__Code\\cuda\\cu_rsp\\test && nvcc -o FFT_conv1d.exe FFT_conv1d.cu -lcufft\" 2>&1 | grep -v \"C4819\" | grep -v \"^C:\" | tail -3; echo \"=== RUN ===\"; cmd.exe /c \"C:\\__Personal\\__Code\\cuda\\cu_rsp\\test\\FFT_conv1d.exe\" 2>&1 | iconv -f GBK -t UTF-8 2>/dev/null"]

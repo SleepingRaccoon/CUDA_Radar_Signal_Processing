@@ -1,0 +1,8 @@
+poisson2d -- 2D Poisson equation by FFT (NVIDIA GeForce RTX 3050 Laptop GPU)
+domain [2] x [1.5], grid 128 x 96, s = 0.12
+cuFFT plan     : 96 x 128 C2C
+compatibility  : int(f) dOmega = 1.073e-08
+GPU solve time : 0.0818 ms
+Throughput     : 150.2 MPix/s
+rel L2 error   : 2.313e-07
+PASS

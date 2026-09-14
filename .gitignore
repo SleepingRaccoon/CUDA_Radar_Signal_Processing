@@ -1,0 +1,74 @@
+# Reasonix local state
+.reasonix/
+
+# VS Code workspace settings
+.vscode/
+
+# Test workspace (sample .cu sources and build outputs)
+test/
+
+# Build artifacts: object files, intermediates, binaries
+*.o
+*.obj
+*.cu.o
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.cubin
+*.fatbin
+*.ptx
+*.d
+
+# nvcc compilation intermediates
+tmpxft_*
+*.cudafe1.cpp
+*.cudafe2.cpp
+*.cudafe1.c
+*.cudafe2.c
+*.cpp.ii
+*.cpp.orig
+*.gpu
+*.linkinfo
+*.dlink
+*.cudafatbin
+
+# CMake generated files
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Coverage
+*.gcda
+*.gcno
+
+# Python
+__pycache__/
+*.pyc
+
+# MATLAB autosave / mex binaries
+*.asv
+*.mex*
+
+# IDE / editor
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Generated plot (plotly HTML export)
+rd_map_3d.html
+
+# Program outputs (npy / png / timing json / exe under output/)
+output/
+
+# Local advisory doc (not for the repository)
+项目建议-v00.md

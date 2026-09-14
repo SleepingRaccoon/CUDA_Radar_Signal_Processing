@@ -1,0 +1,93 @@
+NVIDIA cuda-samples 中与 FFT 相关的示例笔记
+============================================
+来源: C:\__Personal\__Code\cuda\cuda-samples-master\Samples
+本文件按推荐学习顺序排列: 入门 -> 进阶 -> 应用
+（注: fluidsGL / fluidsGLES 两个流体模拟内部也用到 cuFFT，
+  但主题不是 FFT，未列入。）
+
+
+1. simpleCUFFT
+   路径: 4_CUDA_Libraries/simpleCUFFT (simpleCUFFT.cu)
+   简介: cuFFT 最基础的入门示例。用 cuFFT 计算一维卷积:
+         信号与滤波器都变换到频域、相乘、再变换回时域。
+         plan 同时演示了简单 API (cufftPlan1d) 与高级 API
+         (cufftXtMakePlanMany) 两种创建方式。
+   期望学会:
+   - cuFFT 的基本使用流程: cufftPlan1d -> cufftExecC2C ->
+     cufftDestroy (一次建 plan, 多次执行)
+   - 频域卷积的实现套路: FFT 两路 -> 点乘 -> IFFT
+   - 归一化: cuFFT 的逆变换不做归一化, 必须自己除以 FFT 长度
+   - plan (句柄) 概念: 配置/预计算/资源打包, 反复执行
+
+
+2. simpleCUFFT_MGPU
+   路径: 4_CUDA_Libraries/simpleCUFFT_MGPU (simpleCUFFT_MGPU.cu)
+   简介: 与 simpleCUFFT 相同的一维卷积, 但在多块 GPU 上执行。
+   期望学会:
+   - 多 GPU 环境下的 cuFFT 配置 (设备选择、多 GPU plan)
+   - 数据在多个设备间的分配与结果回收
+   - 同一段 FFT 流程如何扩展到多卡
+
+
+3. simpleCUFFT_2d_MGPU
+   路径: 4_CUDA_Libraries/simpleCUFFT_2d_MGPU (simpleCUFFT_2d_MGPU.cu)
+   简介: 二维卷积 (2D FFT), 在多块 GPU 上执行。
+   期望学会:
+   - 二维 cufft plan (cufftPlan2d) 与二维 FFT 流程
+   - 2D 卷积的频域实现: 2D FFT -> 点乘 -> 2D IFFT
+   - 多维数据在多 GPU 上的分块与拼接
+
+
+4. simpleCUFFT_callback
+   路径: 4_CUDA_Libraries/simpleCUFFT_callback (simpleCUFFT_callback.cu)
+   简介: 一维卷积, 但与 simpleCUFFT 不同的是: 频域相乘这一步
+         不再用单独 kernel 做, 而是写成一个 cuFFT 回调
+         (callback), 直接嵌进 FFT kernel 内部完成。
+   期望学会:
+   - cuFFT 回调机制 (CUFFT_CB_LD/ST 回调): 在 FFT 计算过程中
+     插入自定义的加载/存储处理
+   - 用回调把"点乘"融合进 FFT, 省一次 kernel 启动与一次
+     显存往返 (带宽优化思路)
+   - 回调的注册与限制 (回调函数编译要求、性能开销权衡)
+
+
+5. convolutionFFT2D
+   路径: 5_Domain_Specific/convolutionFFT2D
+        (convolutionFFT2D.cu/.cuh, main.cpp, convolutionFFT2D_gold.cpp)
+   简介: 大核 2D 卷积的高效 FFT 实现 (核尺寸很大时, 时域直接
+         卷积太慢, FFT 方法显著更快)。带 CPU 参考 (gold) 对比验证。
+   期望学会:
+   - 核在 FFT 缓冲区中的摆放约定 (中心对齐, 而非起点对齐),
+     以及它与输出对齐的关系
+   - 补零策略: 补到 M+N-1 避免循环卷积混叠 (或按 same 卷积
+     选取输出段)
+   - FFT 卷积的正确性验证方法: 与 CPU 直接卷积逐点对比
+     (gold 参考)
+   - 大核卷积的复杂度优势: O(N log N) vs O(N*K)
+
+
+6. oceanFFT
+   路径: 4_CUDA_Libraries/oceanFFT (oceanFFT.cpp, oceanFFT_kernel.cu)
+   简介: 综合应用示例: 用 cuFFT 生成海洋高度场 (频谱合成),
+         并用 OpenGL 实时渲染。
+   期望学会:
+   - cuFFT 与 OpenGL 的互操作 (Graphics Interop): 把 FFT 结果
+     直接映射为图形纹理, 避免 CPU 往返
+   - 大规模 2D FFT 在真实渲染流水线中的应用
+   - 频谱法合成随机场的思路 (频域赋谱 -> IFFT -> 时域场)
+
+
+学习顺序建议
+============
+  先做 1 (simpleCUFFT, 打底) -> 2/3 (多 GPU 变体, 了解即可)
+  -> 4 (callback 融合, 性能优化思路) -> 5 (卷积细节/验证方法,
+  与本项目 demo/FFT/conv1d 直接相关) -> 6 (综合应用, 观赏向)
+
+与本项目 (cu_rsp) 的对应关系
+============================
+  - conv1d.cu 就是 simpleCUFFT 思路的简化教学版 (补零 M+N-1
+    标准流程 + CPU 参考验证, 对应条目 1 和 5 的验证方法)
+  - PulseCompress_MTD_0.py 的脉冲压缩用的就是频域卷积
+    (IFFT(FFT(rx).*conj(FFT(s))))
+  - 雷达后续的二维处理 (RD 图、SAR 成像) 会用到 2D FFT 与
+    FFT 卷积, 即条目 3/5 的思路
