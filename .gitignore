@@ -72,3 +72,6 @@ output/
 
 # Local advisory doc (not for the repository)
 项目建议-v00.md
+
+# Local tool config (Reasonix), not for the repository
+reasonix.toml
