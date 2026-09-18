@@ -1,14 +1,19 @@
 """
 脉冲压缩 + MTD（NumPy 版，CPU 基准）
 
-来源：../../doc/PC_and_MTD_v01.md 第 3、4、6、7 节
-运行：python src/detect_and_track/Range_and_Velocity/code/py/pc_mtd_v1.py
+来源：04_detect/pulse_compression/doc/PC_v1_math.md（原理）、PC_v1_eng.md（约定与计时口径）
+运行：python 04_detect/pulse_compression/src/py/PC_v1.py
 本程序承担两件事：生成仿真回波基带，以及做 CPU 端的脉压 + MTD
-输出：output/py/pc_mtd_v1_rxbb.npy（仿真回波基带 [Nc][Nw] complex64）
-      output/py/pc_mtd_v1_rdm.npy（距离-多普勒图 [Nr][Nd] complex64）与四张图
-布局：rd 布局 [Nr][Nd]，r 在前 d 在后
-计时：REPS 次取平均，只统计算法时间（内存访存 + 计算，两者在 CPU 上交织，合成一个数）；
-      磁盘读写与回波生成一律在计时区外；LFM 频谱是雷达系统常驻量，预先算好，不计时
+输入：无，回波由本程序自行生成
+运行后打印系统参数、派生参数与理论信噪比增益（脉压 Ns、MTD Nc、加窗处理增益、总增益）
+输出：04_detect/pulse_compression/output/py/PC_v1_rxbb.npy（仿真回波基带 [Nc][Nw] complex64）
+      04_detect/pulse_compression/output/py/PC_v1_rdmap.npy（距离-多普勒图 [Nr][Nd] complex64）
+      04_detect/pulse_compression/output/py/PC_v1_timing.json 与四张图
+布局：rd = [Nr][Nd]（r 在外、d 在内），dr = [Nd][Nr]
+计时：REPS 次取中位数（与 GPU 版同一口径，见 PC_v1_eng.md）。算法时间不含 IO：读原始
+      回波、写 RD 矩阵、绘图与写 json 都在计时区外，回波生成与 LFM 频谱、Hann 窗预先
+      算好也不计时。CPU 只有一个数：总时间，语义上等于 CPU 计算时间 + CPU 内存时间，
+      NumPy 层面两者交织在一起，不拆
 """
 
 import json
@@ -24,9 +29,9 @@ REPS = 100
 
 OUT = Path(__file__).resolve().parents[2] / "output" / "py"
 OUT.mkdir(parents=True, exist_ok=True)
-TAG = "pc_mtd_v1"
-RXBB = OUT / (TAG + "_rxbb.npy")     # 仿真回波基带
-RDM = OUT / (TAG + "_rdm.npy")       # 距离-多普勒图
+TAG = "PC_v1"
+RXBB = OUT / (TAG + "_rxbb.npy")         # 仿真回波基带
+RDMAP = OUT / (TAG + "_rdmap.npy")       # 距离-多普勒图，rd 布局
 
 # IEEE 风格绘图：衬线字体，数学符号用 Computer Modern，刻度内向，高 dpi
 plt.rcParams.update({
@@ -88,6 +93,19 @@ v_ua = lam * fr / 4.0                # 最大不模糊速度
 r_axis = c / 2.0 * t_start + np.arange(Nr) * range_cell
 v_axis = -(lam / 2.0) * (np.arange(-(Nd // 2), Nd // 2) * fr / Nd)
 
+# ---------------- 慢时间加窗 ----------------
+# 周期汉宁窗，长度等于脉冲数（雷达系统常驻量，预先算好，不计时）
+W = np.hanning(Nc + 1)[:-1].astype(np.float32)                 # [Nc]
+
+# ---------------- 信噪比增益（理论值） ----------------
+# 相干增益（幅度）= sum(w)/N；处理增益（信噪比）= (sum w)^2 / sum w^2，
+# 处理增益与 N 的比值就是加窗带来的信噪比损失，Hann 为 2/3，即 -1.76 dB
+win_coh = float(W.sum() / Nc)                            # 相干增益，Hann = 0.5
+win_gain = float(W.sum() ** 2 / (Nc * np.sum(W ** 2)))   # 处理增益相对无窗，Hann = 2/3
+gain_pc = float(Ns)                                      # 脉压：相干积累 Ns 个采样
+gain_fft = float(Nc)                                     # MTD：Nc 点相干积累
+gain_total = gain_pc * gain_fft * win_gain               # 总信噪比增益
+
 # ---------------- 打印系统参数与派生参数 ----------------
 print("=" * 62)
 print("pulse compression + MTD  (NumPy)")
@@ -132,6 +150,17 @@ for k, v in [
 ]:
     print("  %-34s %s" % (k, v))
 
+print("SNR gain  (per-sample input SNR -> RD peak)")
+for k, g in [
+    ("pulse compression  Ns", gain_pc),
+    ("MTD (Doppler FFT)  Nc", gain_fft),
+    ("window (Hann)  (sum w)^2/(N sum w^2)", win_gain),
+    ("total = Ns * Nc * window", gain_total),
+]:
+    print("  %-38s %10.4f   %9.3f dB" % (k, g, 10.0 * np.log10(g)))
+print("  %-38s %10.4f   %9.3f dB   amplitude, not in the SNR budget"
+      % ("(window coherent gain  sum w/N)", win_coh, 20.0 * np.log10(win_coh)))
+
 print("scene")
 for i, t in enumerate(targets):
     print("  target %d   R = %8.1f m   v = %+7.2f m/s   amp = %+5.1f dB   A = %.5f" % (i + 1, t[0], t[1], t[2], amp[i]))
@@ -149,18 +178,16 @@ t_ = t_fast[None, None, :]
 tau_m = 2.0 * (targets[:, 0][:, None, None] + targets[:, 1][:, None, None] * m_idx * Tr) / c
 gate = (t_ >= tau_m) & (t_ < tau_m + Tp)
 echo = np.exp(1j * np.pi * K * (t_ - tau_m - Tp / 2.0) ** 2) * np.exp(-1j * 2.0 * np.pi * fc * tau_m)
-rx = (amp[:, None, None] * np.exp(1j * targets[:, 3])[:, None, None] * gate * echo).sum(axis=0)
+rxbb = (amp[:, None, None] * np.exp(1j * targets[:, 3])[:, None, None] * gate * echo).sum(axis=0)
 
 # 复高斯白噪声，每个采样点方差 sigma^2 = 1；采集数据落到 complex64
-rxbb = (rx + (sigma / np.sqrt(2.0)) * (rng.standard_normal((Nc, Nw)) + 1j * rng.standard_normal((Nc, Nw)))).astype(np.complex64)
+rxbb = (rxbb + (sigma / np.sqrt(2.0)) * (rng.standard_normal((Nc, Nw)) + 1j * rng.standard_normal((Nc, Nw)))).astype(np.complex64)
 np.save(RXBB, rxbb)
 print("saved: %s   %s   %s" % (RXBB, rxbb.shape, rxbb.dtype))
 
-# ---------------- 雷达系统常驻量：LFM 频谱与加窗（预先算好，不计时） ----------------
+# ---------------- 雷达系统常驻量：LFM 频谱（预先算好，不计时） ----------------
 # H = conj(FFT(s_tx_bb)) 为相关形式，峰值索引直接对应回波起始
 H = np.conj(np.fft.fft(s_tx_bb, N_fft)).astype(np.complex64)   # [N_fft]
-# 慢时间加窗：周期汉宁窗，长度等于脉冲数
-W = np.hanning(Nc + 1)[:-1].astype(np.float32)                 # [Nc]
 
 
 def run_once(rxbb):
@@ -169,17 +196,19 @@ def run_once(rxbb):
     raw_pad[:, :Nw] = rxbb
     # 距离维匹配滤波，截取前 Nr 个距离单元 -> [Nc][Nr]
     pc = np.fft.ifft(np.fft.fft(raw_pad, axis=1) * H[None, :], axis=1).astype(np.complex64)[:, 0:Nr]
-    # 加窗 + 转置成 rd 布局 -> [Nr][Nc]
-    rd = np.ascontiguousarray((pc * W[:, None]).T)
+    # 先转置成 rd 布局，再原地加窗 -> [Nr][Nc]
+    # 先乘后转要额外多一个 [Nc][Nr] 临时数组和一遍写，实测 1.94 -> 1.18 ms
+    rd = np.ascontiguousarray(pc.T)
+    np.multiply(rd, W[None, :], out=rd)
     # 慢时间 FFT + fftshift -> [Nr][Nd]
     return np.fft.fftshift(np.fft.fft(rd, n=Nd, axis=1), axes=1).astype(np.complex64)
 
 
 # ---------------- 第一次执行：这一次的结果就是输出 ----------------
-rdm = run_once(rxbb)
-np.save(RDM, rdm)
+rdmap = run_once(rxbb)
+np.save(RDMAP, rdmap)
 
-mag = np.abs(rdm)
+mag = np.abs(rdmap)
 print("self-check  (peak vs ground truth)")
 for i, t in enumerate(targets):
     r_win = (r_axis >= t[0] - 5.0 * range_cell) & (r_axis <= t[0] + 5.0 * range_cell)
@@ -197,7 +226,7 @@ im = ax.imshow(mag, origin="lower", aspect="auto", extent=ext, cmap="viridis", i
 ax.set_xlabel(r"$v$ (m/s)")
 ax.set_ylabel(r"$R$ (km)")
 fig.colorbar(im, ax=ax).set_label(r"$|s_{\mathrm{RD}}|$")
-fig.savefig(OUT / (TAG + "_rdm_2d.png"))
+fig.savefig(OUT / (TAG + "_rdmap_2d.png"))
 plt.close(fig)
 
 fig, ax = plt.subplots(figsize=(3.5, 2.8))
@@ -205,7 +234,7 @@ im = ax.imshow(db, origin="lower", aspect="auto", extent=ext, cmap="viridis", vm
 ax.set_xlabel(r"$v$ (m/s)")
 ax.set_ylabel(r"$R$ (km)")
 fig.colorbar(im, ax=ax).set_label(r"$|s_{\mathrm{RD}}|$ (dB)")
-fig.savefig(OUT / (TAG + "_rdm_2d_dB.png"))
+fig.savefig(OUT / (TAG + "_rdmap_2d_dB.png"))
 plt.close(fig)
 
 for tag, z, zlabel, zlim in (("", mag, r"$|s_{\mathrm{RD}}|$", None), ("_dB", db, r"$|s_{\mathrm{RD}}|$ (dB)", (-60.0, 0.0))):
@@ -218,29 +247,33 @@ for tag, z, zlabel, zlim in (("", mag, r"$|s_{\mathrm{RD}}|$", None), ("_dB", db
     ax.set_zlabel(zlabel)
     if zlim is not None:
         ax.set_zlim(*zlim)
-    fig.savefig(OUT / (TAG + "_rdm_3d%s.png" % tag))
+    fig.savefig(OUT / (TAG + "_rdmap_3d%s.png" % tag))
     plt.close(fig)
 
-# ---------------- 计时：REPS 次取平均，只统计算法时间 ----------------
+# ---------------- 计时：REPS 次取中位数，只统计算法时间 ----------------
 # 输入数据已在内存里（上面的 rxbb），磁盘读写与回波生成都在计时区之外
+# 与 GPU 版同一口径：报中位数，同时给 min/max，避免单次抖动和低频态污染结论
 run_once(rxbb)                       # 热身
-t_algo = 0.0
-for _ in range(REPS):
+samples = np.empty(REPS)
+for i in range(REPS):
     t0 = time.perf_counter()
     run_once(rxbb)
-    t_algo += time.perf_counter() - t0
-t_algo /= REPS
+    samples[i] = (time.perf_counter() - t0) * 1e3
+t_algo = float(np.median(samples))
 
-print("timing  (mean of %d runs)" % REPS)
-print("  %-34s %10.3f ms" % ("algorithm time (memory + compute)", t_algo * 1e3))
+print("timing  (median of %d runs)" % REPS)
+print("  %-34s %10.3f ms   (min %.3f  max %.3f)"
+      % ("algorithm time (memory + compute)", t_algo, samples.min(), samples.max()))
 
 with open(OUT / (TAG + "_timing.json"), "w") as f:
     json.dump({
         "tag": TAG,
         "reps": REPS,
-        "algo_ms": t_algo * 1e3,
+        "algo_ms": t_algo,
+        "algo_min_ms": float(samples.min()),
+        "algo_max_ms": float(samples.max()),
     }, f, indent=2)
 
-print("saved: %s" % RDM)
+print("saved: %s" % RDMAP)
 print("saved: %s" % (OUT / (TAG + "_timing.json")))
 print("saved: 4 figures in %s" % OUT)

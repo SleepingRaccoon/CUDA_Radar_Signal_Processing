@@ -1,13 +1,23 @@
-# Reasonix local state
-.reasonix/
+# ============================================================
+# cu_rsp 忽略规则
+#
+# 原则：可执行文件、编译中间件、生成的数据与图都不入库——一条命令就能重跑出来；
+#       性能证据（*.ncu-rep）故意不忽略，它是结论的原始数据。
+# ============================================================
 
-# VS Code workspace settings
-.vscode/
+# ---- 本地个人文件：不进公开仓库 ----
+项目建议*.md
 
-# Test workspace (sample .cu sources and build outputs)
-test/
+# ---- CMake / Visual Studio 构建产物 ----
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+.vs/
 
-# Build artifacts: object files, intermediates, binaries
+# ---- 编译中间件与二进制 ----
 *.o
 *.obj
 *.cu.o
@@ -19,12 +29,18 @@ test/
 *.dll
 *.exe
 *.out
+*.d
+*.pdb
+*.ilk
+*.exp
+*.gcda
+*.gcno
+
+# ---- CUDA / nvcc ----
 *.cubin
 *.fatbin
 *.ptx
-*.d
-
-# nvcc compilation intermediates
+*.sass
 tmpxft_*
 *.cudafe1.cpp
 *.cudafe2.cpp
@@ -37,41 +53,39 @@ tmpxft_*
 *.dlink
 *.cudafatbin
 
-# CMake generated files
-build/
-cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-compile_commands.json
-
-# Coverage
-*.gcda
-*.gcno
-
-# Python
+# ---- Python / CuPy ----
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+venv/
+.cupy/
 
-# MATLAB autosave / mex binaries
+# ---- 生成的数据、图与计时（各模块 output/ 目录）----
+output/
+rd_map_3d.html
+
+# ---- MATLAB autosave / mex ----
 *.asv
 *.mex*
 
-# IDE / editor
+# ---- 编辑器与系统 ----
+.vscode/
 .idea/
 *.swp
 *~
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Generated plot (plotly HTML export)
-rd_map_3d.html
+# ---- 独立试验场：样例源码与构建产物混放 ----
+test/
 
-# Program outputs (npy / png / timing json / exe under output/)
-output/
+# ---- 临时文件 ----
+*.tmp
+*.bak
 
-# Local advisory doc (not for the repository)
-项目建议-v00.md
-
-# Local tool config (Reasonix), not for the repository
-reasonix.toml
+# ---- 故意不忽略 ----
+# *.ncu-rep 是 Nsight 原始证据，按项目建议第 3 节要求归档；单文件过大时改用 Git LFS。
